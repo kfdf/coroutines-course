@@ -1,0 +1,2 @@
+A reimplementation of code samples from 
+[A Curious Course on Coroutines and Concurrency](http://www.dabeaz.com/coroutines) in javascript. I tried to follow the original closely, but sometimes, especially towards the end, direct coversion doesn't make sense. Requires Deno to run.
