@@ -1,32 +1,52 @@
-class Task {
+export class Task {
   static taskid = 0
   constructor(target) {
     this.tid = ++Task.taskid
     this.target = target
     this.sendval = undefined
+    this.stack = []
   }
   run() {
-    if (this.sendval instanceof Error) {
-      return this.target.throw(this.sendval)
-    } else {
-      return this.target.next(this.sendval)
+    // pretending yield* doesn't exist
+    while (true) {
+      let r
+      try {
+        r = this.sendval instanceof Error ?
+          this.target.throw(this.sendval) :
+          this.target.next(this.sendval)
+      } catch (err) {
+        if (!this.stack.length) throw err
+        r = { done: false, value: err}
+      }
+      if (!r.done && r.value instanceof SystemCall) {
+        return r
+      } else if (!r.done && typeof r.value.next == 'function') {
+        this.stack.push(this.target)
+        this.sendval = undefined
+        this.target = r.value
+      } else if (this.stack.length) {
+        this.sendval = r.value
+        this.target = this.stack.pop()
+      } else {
+        return r
+      }
     }
   }
 }
-class SystemCall {
+export class SystemCall {
   /** @type {Task} */
   task = null
   /** @type {Scheduler} */
   sched = null
   handle() { }
 }
-class GetTid extends SystemCall {
+export class GetTid extends SystemCall {
   handle() {
     this.task.sendval = this.task.tid
     this.sched.schedule(this.task)
   }
 }
-class NewTask extends SystemCall {
+export class NewTask extends SystemCall {
   constructor(target) {
     super()
     this.target = target
@@ -37,7 +57,7 @@ class NewTask extends SystemCall {
     this.sched.schedule(this.task)
   }
 }
-class KillTask extends SystemCall {
+export class KillTask extends SystemCall {
   constructor(tid) {
     super()
     this.tid = tid
@@ -53,7 +73,7 @@ class KillTask extends SystemCall {
     this.sched.schedule(this.task)
   }
 }
-class WaitTask extends SystemCall {
+export class WaitTask extends SystemCall {
   constructor(tid) {
     super()
     this.tid = tid
@@ -64,7 +84,7 @@ class WaitTask extends SystemCall {
     if (!waiting) this.sched.schedule(this.task)
   }
 }
-class WaitPromise extends SystemCall {
+export class WaitPromise extends SystemCall {
   constructor(promise) {
     super()
     this.promise = promise
@@ -77,7 +97,7 @@ class WaitPromise extends SystemCall {
     this.promise.then(handler, handler)
   }
 }
-class Scheduler {
+export class Scheduler {
   constructor() {
     /** @type{Task[]} */
     this.queue = []
@@ -133,69 +153,5 @@ class Scheduler {
   }
 }
 
-class Listener {
-  constructor(listener) {
-    this.listener = listener
-  }
-  * accept() {
-    let conn = yield new WaitPromise(this.listener.accept())
-    return new Connection(conn)
-  }
-}
-class Connection {
-  constructor(conn) {
-    /** 
-    @private
-    @type {Deno.Conn} */
-    this.conn = conn
-  }
-  get remoteAddr() {
-    return this.conn.remoteAddr
-  }
-  * send(buf) {
-    while (buf.length) {
-      let len = yield new WaitPromise(this.conn.write(buf))
-      buf = buf.subarray(len)
-    }
-  }
-  * receive(buf) {
-    return yield new WaitPromise(this.conn.read(buf))
-  }
-  * close() {
-    this.conn.close()
-  }
-}
-/** @param {Connection} conn */
-function* handleClient(conn) {
-  let { hostname, port } = conn.remoteAddr
-  try {
-    console.log('connection from', hostname, port)
-    let buffer = new Uint8Array(4096)
-    while (true) {
-      let bytesRead = yield* conn.receive(buffer)
-      if (bytesRead == null) break
-      yield* conn.send(buffer.subarray(0, bytesRead))
-    }
-  } catch (err) {
-    console.log(hostname, port, err.message)
-  } finally {
-    conn.close()
-    console.log(hostname, port, 'closed')
-  }
-}
-function* main(port) {
-  try {
-    console.log('server starting')
-    let listener = new Listener(Deno.listen({ port }))
-    while (true) {
-      let conn = yield* listener.accept()
-      if (conn == null) break
-      yield new NewTask(handleClient(conn))
-    }
-  } catch (err) {
-    console.log('server', err.message)
-  }
-}
-let sched = new Scheduler()
-sched.new(main(45000))
-sched.mainloop()
+
+
